@@ -4,16 +4,18 @@ import os
 import shutil
 import sqlite3
 import uuid
+from typing import Literal
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
-from fastapi import FastAPI, HTTPException, UploadFile, Request
+from fastapi import FastAPI, HTTPException, UploadFile, Request, Form
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, model_validator
 from . import db, pipeline, chat, vectors
 from .config import MEDIA, MAX_UPLOAD
 from .transcript import youtube_id, validate_file
 from .media import ProcessingError
+from .translation import needs_translation
 from .llm import client as llm_client
 
 logging.basicConfig(level=logging.INFO)
@@ -56,6 +58,7 @@ def public(v, full=False):
 
 class YoutubeInput(BaseModel):
     url: str = Field(min_length=1,max_length=2048)
+    language: Literal['auto','en','hi','mr'] = 'auto'
 
 class ChatInput(BaseModel):
     question: str = Field(min_length=1,max_length=2000)
@@ -89,13 +92,13 @@ def youtube(body: YoutubeInput):
     existing=db.duplicate(key)
     if existing: return public(existing)
     video_id=uuid.uuid4().hex
-    try: db.insert({'id':video_id,'source_key':key,'source_type':'youtube','youtube_id':yt,'title':'YouTube video'})
+    try: db.insert({'id':video_id,'source_key':key,'source_type':'youtube','youtube_id':yt,'title':'YouTube video','language':None if body.language=='auto' else body.language})
     except sqlite3.IntegrityError: return public(db.duplicate(key))
     pipeline.submit(video_id)
     return public(require(video_id))
 
 @app.post('/api/videos/upload')
-async def upload(file: UploadFile):
+async def upload(file: UploadFile, language: Literal['auto','en','hi','mr'] = Form('auto')):
     try: name,ext=validate_file(file.filename)
     except ValueError as exc: raise HTTPException(422,str(exc)) from None
     video_id=uuid.uuid4().hex
@@ -118,7 +121,7 @@ async def upload(file: UploadFile):
             shutil.rmtree(folder)
             return public(existing)
         try:
-            db.insert({'id':video_id,'source_key':key,'source_type':'upload','title':name,'filename':name,'file_size':size,'media_path':str(target)})
+            db.insert({'id':video_id,'source_key':key,'source_type':'upload','title':name,'filename':name,'file_size':size,'media_path':str(target),'language':None if language=='auto' else language})
         except sqlite3.IntegrityError:
             shutil.rmtree(folder)
             return public(db.duplicate(key))
@@ -159,6 +162,16 @@ def ask(video_id: str, body: ChatInput):
 def retry(video_id: str):
     v=require(video_id)
     if v['status']=='failed': pipeline.submit(video_id)
+    return public(require(video_id))
+
+@app.post('/api/videos/{video_id}/translate')
+def translate_saved(video_id: str):
+    v=require(video_id)
+    if v['status'] in {'queued','processing'}:
+        raise HTTPException(409,'Wait for the current processing to finish.')
+    if not needs_translation(v):
+        raise HTTPException(409,'No untranslated Hindi or Marathi transcript is available.')
+    pipeline.submit(video_id)
     return public(require(video_id))
 
 @app.get('/api/videos/{video_id}/media')

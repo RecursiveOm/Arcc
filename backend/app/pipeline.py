@@ -7,6 +7,7 @@ from .config import MEDIA
 from .transcript import clean_segments, chunk_segments
 from .ml import safe_discover
 from .llm import analyze
+from .translation import needs_translation, translate
 
 log=logging.getLogger(__name__)
 executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='arc-worker')
@@ -41,7 +42,7 @@ def process(video_id):
                 db.update(video_id,media_path=str(playback))
                 path.unlink(missing_ok=True)
             stage('Loading speech model')
-            raw,language,duration=media.transcribe(audio,stage)
+            raw,language,duration=media.transcribe(audio,stage,language=v.get('language'))
             transcript=clean_segments(raw)
             if not transcript: raise media.ProcessingError('No speech was detected in this video.')
             db.update(video_id,transcript=transcript,language=language,duration=duration)
@@ -50,6 +51,11 @@ def process(video_id):
                 path.unlink(missing_ok=True)
                 db.update(video_id,media_path=None)
         v=db.get(video_id)
+        if needs_translation(v):
+            # Existing results from the original language must not mix with English evidence.
+            db.update(video_id,chunks=None,ml=None,analysis=None,embedded=0)
+            translate(v,stage)
+            v=db.get(video_id)
         if not v['chunks']:
             stage('Structuring transcript')
             db.update(video_id,chunks=chunk_segments(video_id,v['transcript']))
@@ -57,6 +63,8 @@ def process(video_id):
         if not v['embedded']:
             stage('Creating embeddings')
             embeddings=vectors.embed([c['text'] for c in v['chunks']])
+            if any(s.get('translation_language') == 'en' for s in v['transcript']):
+                vectors.delete(video_id)
             vectors.store(video_id,v['chunks'],embeddings)
             stage('Discovering topics · K-Means / PCA')
             ml=safe_discover(v['chunks'],embeddings)

@@ -50,7 +50,8 @@ Next.js / TypeScript / Tailwind
 FastAPI ─ SQLite metadata, transcript, chunks, analysis, chat, LLM cache
     │
     └─ one background processing worker
-       Video → FFmpeg audio → faster-whisper → timestamped chunks
+       Video → FFmpeg audio → faster-whisper → original timestamped transcript
+         → Hindi/Marathi text translated to English → timestamped chunks
          → local SentenceTransformer → persistent Chroma vectors
          → K-Means + Silhouette selection + PCA
          → OpenRouter topic names + hierarchical summary / chapters / study notes
@@ -70,11 +71,21 @@ Question → local embedding → current-video Chroma retrieval (+ bounded neigh
 
 Supported: `.mp4`, `.mov`, `.webm`, `.mkv`, `.mp3`, `.wav`, `.m4a`, and public YouTube watch/shorts/live links or `youtu.be` links. Default upload limit: 1 GB. Files are streamed in 1 MB reads, assigned generated internal paths, and checked with ffprobe. Uploaded media is converted to browser-playable H.264/AAC (or AAC for audio).
 
-Stages are real database states: queued, downloading, extracting audio, preparing playback, transcription (with elapsed source time), structuring, embedding, topic discovery, analysis, ready. The UI never marks a failed job ready. Original Whisper text is preserved alongside whitespace-cleaned segments. Temporary WAV files are removed. Uploaded playback is retained; YouTube audio is removed after transcription.
+Stages are real database states: queued, downloading, extracting audio, preparing playback, transcription (with elapsed source time), structuring, embedding, topic discovery, analysis, ready. The UI never marks a failed job ready. Original Whisper text is preserved in each segment’s `original_text`. For Hindi (`hi`) and Marathi (`mr`), ARC then translates the saved text to English before chunking, embeddings, topic discovery and analysis. English is stored in `text`, with `translation_language: "en"`; source language and timestamps remain unchanged. Temporary WAV files are removed. Uploaded playback is retained; YouTube audio is removed after transcription.
 
 YouTube IDs and upload SHA-256 hashes prevent repeated processing. The same input opens the existing result. Failed items expose **Retry**. Completed transcription, embeddings, ML metadata, and intermediate LLM summaries are reused. A backend restart marks interrupted jobs failed, allowing an explicit retry. Ready results are read from storage, not regenerated.
 
 Click a chapter, transcript timestamp, topic-map point, or chat citation to seek the player. Time range inputs accept seconds, `MM:SS`, or `HH:MM:SS`. Range evidence includes whole Whisper segments **entirely inside** the requested interval, excluding overlapping boundary utterances. Empty ranges produce an explicit insufficient-evidence answer.
+
+## Hindi and Marathi videos
+
+Choose **Detect automatically**, **Hindi · हिन्दी**, **Marathi · मराठी**, or **English** under Speech language before adding a YouTube link or file. An explicit language helps with short or mixed-language recordings. Use a multilingual Whisper model such as the default `small`; English-only `.en` models are unsuitable for Hindi/Marathi speech.
+
+The flow is **speech → original Hindi/Marathi transcript → English transcript → existing English analysis and retrieval**. Translation uses the existing backend LLM provider in bounded batches, with structured validation, the same retry policy and persistent caching. No additional API key, translation service, model download, or database migration is needed. English videos skip translation. Translation quality depends on the recognized speech and provider; check the original text and audio when precision matters.
+
+On **Transcript**, switch between **English**, **Original**, and **Both**, search the selected version, or **Download transcript** as timestamped UTF-8 text. Both languages seek to the same original audio timestamps. This creates translated text, not dubbed audio or a new English-speaking video.
+
+Each successful translation batch is saved. If the provider is unavailable, the original transcript remains accessible; **Retry** resumes translation without running Whisper again. Indexing and summaries wait for English translation to finish. For an existing saved Hindi/Marathi video, open Transcript and choose **Translate to English** to regenerate derived analysis from English without repeating speech recognition. Existing library items are not automatically reprocessed. Duplicate uploads/URLs still open their saved result, including its original language selection.
 
 ## The explicit machine-learning component
 
@@ -96,7 +107,7 @@ Long transcripts use bounded section summaries and recursive reduction, with per
 
 Chat embeds the question locally, retrieves up to five chunks from **only the selected video**, adds at most two neighboring chunks, and caps evidence at 20,000 characters. Range chat ranks only in-range content locally. Recent conversation is bounded and marked as non-evidence. Model evidence IDs must point to supplied excerpts before citation chips are returned. Prompt instructions require insufficient-evidence answers; as with any LLM, users should check cited moments. Responses are displayed as text, not executable HTML.
 
-The key is configured through `.env`, not a browser input. OpenRouter and its routed model provider receive transcript excerpts, section summaries, and bounded recent chat. YouTube ingestion/playback and initial model downloads require internet access. Everything except OpenRouter inference runs locally. No other paid API is used.
+The key is configured through `.env`, not a browser input. OpenRouter and its routed model provider receive transcript excerpts, section summaries, and bounded recent chat. YouTube ingestion/playback and initial model downloads require internet access. Speech recognition, storage, embeddings and clustering run locally; text translation, synthesis and Q&A use the configured LLM provider. No other paid API is used.
 
 The implementation follows [OpenRouter free-router documentation](https://openrouter.ai/openrouter/free) and [SentenceTransformer input-length documentation](https://www.sbert.net/docs/package_reference/sentence_transformer/model.html).
 

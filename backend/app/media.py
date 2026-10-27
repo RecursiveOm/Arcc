@@ -65,8 +65,8 @@ def whisper():
     if device=='auto': device = 'cuda' if ctranslate2.get_cuda_device_count() else 'cpu'
     return WhisperModel(os.getenv('WHISPER_MODEL','small'),device=device,compute_type='float16' if device=='cuda' else 'int8')
 
-def transcribe(path, progress):
-    segments, info = whisper().transcribe(str(path),beam_size=5,vad_filter=True)
+def transcribe(path, progress, language=None):
+    segments, info = whisper().transcribe(str(path),beam_size=5,vad_filter=True,task="transcribe",language=language)
     result=[]
     for s in segments:
         result.append({'start':s.start,'end':s.end,'text':s.text})

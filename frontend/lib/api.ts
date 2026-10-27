@@ -1,4 +1,4 @@
-export type Segment = { start: number; end: number; text: string; original_text?: string };
+export type Segment = { start: number; end: number; text: string; original_text?: string; translation_language?: "en" };
 export type Chunk = Segment & { chunk_id: number; cluster_id?: number };
 export type Moment = { start: number; title: string; description?: string };
 export type Section = { title: string; content: string };

@@ -29,7 +29,7 @@ export const Player=forwardRef<PlayerHandle,{video:Video}>(function Player({vide
     if (video.source_type==='youtube') {
       if (loaded.current && yt.current) { yt.current.seekTo(seconds,true); yt.current.playVideo(); }
       else pending.current=seconds;
-    } else if(native.current) { native.current.currentTime=seconds; void native.current.play().catch(()=>{}); }
+    } else if(native.current) { if(native.current.readyState<1) pending.current=seconds; else {native.current.currentTime=seconds; void native.current.play().catch(()=>{});} }
   }}),[video.source_type]);
   useEffect(()=>{
     if(!video.youtube_id) return;
@@ -44,5 +44,5 @@ export const Player=forwardRef<PlayerHandle,{video:Video}>(function Player({vide
     }).catch((e:Error)=>{if(!cancelled)setError(e.message);});
     return ()=>{cancelled=true;loaded.current=false;yt.current?.destroy();yt.current=null;};
   },[video.youtube_id]);
-  return <div className="player-wrap">{video.source_type==='youtube'?<div ref={host} className="youtube-player"/>:video.has_media?<video ref={native} controls preload="metadata" src={`/api/videos/${video.id}/media`} onError={()=>setError('Playback is unavailable while this file is being prepared.')} />:<div className="player-placeholder">Your video will appear here after ingestion.</div>}{error&&<div className="player-error" role="status">{error}</div>}</div>;
+  return <div className="player-wrap">{video.source_type==='youtube'?<div ref={host} className="youtube-player"/>:video.has_media?<video ref={native} onLoadedMetadata={()=>{if(pending.current!==null&&native.current){native.current.currentTime=pending.current;pending.current=null;void native.current.play().catch(()=>{});}}} controls preload="metadata" src={`/api/videos/${video.id}/media`} onError={()=>setError('Playback is unavailable while this file is being prepared.')} />:<div className="player-placeholder">Your video will appear here after ingestion.</div>}{error&&<div className="player-error" role="status">{error}</div>}</div>;
 });

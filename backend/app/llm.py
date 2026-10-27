@@ -188,7 +188,7 @@ class LLMClient:
                 return parsed
             except ValidationError as exc:
                 if attempt==0:
-                    errors = json.dumps(exc.errors(include_input=False, include_url=False))[:1200]
+                    errors = json.dumps(exc.errors(include_input=False, include_url=False, include_context=False))[:1200]
                     content += '\nYour last response did not match the schema. Return only corrected JSON. Validation errors: '+errors+'\nPrevious response: '+raw[:12000]
         raise ProcessingError('LLM provider returned invalid structured data twice. Your transcript is saved; retry analysis.')
 
